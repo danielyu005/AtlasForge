@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AtlasForge — 圖集裁切與重排工具</title>
+<style>
+  :root{
+    --bg:#14161c; --panel:#1c1f28; --panel2:#232733; --line:#313745;
+    --txt:#e6e9f0; --muted:#8c94a6; --accent:#f0894e; --accent2:#5ac8fa;
+    --ok:#5fd08a; --warn:#f2c14e; --err:#f0665a; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:"Segoe UI","Microsoft JhengHei",system-ui,sans-serif;
+    font-size:14px; line-height:1.5;
+  }
+  h1{font-size:18px;margin:0}
+  h2{font-size:13px;margin:0 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  a{color:var(--accent2)}
+  .app{display:flex;flex-direction:column;height:100vh}
+  header{
+    display:flex;align-items:center;gap:12px;padding:12px 18px;
+    background:var(--panel);border-bottom:1px solid var(--line)
+  }
+  header .logo{font-weight:700;color:var(--accent);letter-spacing:.02em}
+  header .sub{color:var(--muted);font-size:12px}
+  header .spacer{flex:1}
+  .main{flex:1;display:flex;min-height:0}
+  .side{
+    width:320px;flex:none;background:var(--panel);border-right:1px solid var(--line);
+    overflow-y:auto;padding:16px
+  }
+  .stage{flex:1;min-width:0;display:flex;flex-direction:column}
+  .stage-bar{
+    display:flex;align-items:center;gap:14px;padding:10px 16px;
+    border-bottom:1px solid var(--line);background:var(--panel2);flex-wrap:wrap
+  }
+  .stage-view{
+    flex:1;overflow:hidden;position:relative;cursor:grab;touch-action:none;
+    background-image:
+      linear-gradient(45deg,#0e1015 25%,transparent 25%),
+      linear-gradient(-45deg,#0e1015 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#0e1015 75%),
+      linear-gradient(-45deg,transparent 75%,#0e1015 75%);
+    background-size:22px 22px;
+    background-position:0 0,0 11px,11px -11px,-11px 0
+  }
+  .stage-view.panning{cursor:grabbing}
+  #view{
+    image-rendering:pixelated;background:transparent;display:block;
+    position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform
+  }
+  /* 邊框覆蓋層:不隨影像縮放,固定螢幕像素 → 線條永遠清晰 */
+  #overlay{position:absolute;top:0;left:0;pointer-events:none}
+  .anim-view canvas{display:block}
+  #zoomInput{width:58px;text-align:right;font-variant-numeric:tabular-nums}
+  /* 右側動畫預覽面板 */
+  .anim{width:280px;flex:none;background:var(--panel);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;min-height:0}
+  .anim-head{padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;color:var(--accent2)}
+  .anim-view{flex:none;height:280px;margin:16px;border:1px solid var(--line);border-radius:var(--radius);
+    position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden;
+    background-image:
+      linear-gradient(45deg,#0e1015 25%,transparent 25%),
+      linear-gradient(-45deg,#0e1015 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#0e1015 75%),
+      linear-gradient(-45deg,transparent 75%,#0e1015 75%);
+    background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
+  .anim-view.bg-dark{background:#0b0d12}
+  .anim-view.bg-light{background:#c9ccd4}
+  .anim-view canvas{max-width:100%;max-height:100%;image-rendering:pixelated;display:block}
+  .anim-empty{position:absolute;color:var(--muted);font-size:12px;text-align:center;pointer-events:none}
+  .anim-ctrl{padding:0 16px 16px;display:flex;flex-direction:column;gap:10px}
+  .anim-row{display:flex;align-items:center;gap:8px}
+  .anim-lbl{color:var(--muted);font-size:12px}
+  .anim-count{color:var(--txt);font-size:12px;font-variant-numeric:tabular-nums;margin-left:auto}
+  .group{margin-bottom:20px}
+  .field{margin-bottom:12px}
+  .field label{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1;min-width:0}
+  input[type=number],input[type=text],select{
+    width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:7px 9px;font-size:13px;outline:none
+  }
+  input:focus,select:focus{border-color:var(--accent)}
+  input[type=range]{width:100%}
+  .seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{
+    flex:1;background:transparent;border:none;color:var(--muted);padding:8px 6px;
+    cursor:pointer;font-size:12px;font-weight:600
+  }
+  .seg button.on{background:var(--accent);color:#1a1206}
+  .seg.two button.on{background:var(--accent2);color:#04222e}
+  .check{display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--txt);font-size:13px}
+  .check input{width:auto}
+  button.btn{
+    background:var(--accent);color:#1a1206;border:none;border-radius:8px;
+    padding:10px 14px;font-weight:700;cursor:pointer;font-size:13px;width:100%
+  }
+  button.btn.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  button.btn:disabled{opacity:.4;cursor:not-allowed}
+  button.mini{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:7px;padding:6px 10px;cursor:pointer;font-size:12px}
+  .drop{
+    border:2px dashed var(--line);border-radius:var(--radius);padding:22px 14px;text-align:center;
+    color:var(--muted);cursor:pointer;transition:.15s
+  }
+  .drop.hot{border-color:var(--accent);color:var(--txt);background:rgba(240,137,78,.06)}
+  .drop b{color:var(--txt)}
+  .hint{color:var(--muted);font-size:11px;margin-top:4px}
+  .stat{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px dotted var(--line)}
+  .stat b{color:var(--txt);font-variant-numeric:tabular-nums}
+  .stat .good{color:var(--ok)}
+  .stat .bad{color:var(--warn)}
+  .toolbar-label{color:var(--muted);font-size:12px}
+  .pill{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
+  .empty{color:var(--muted);text-align:center;font-size:13px;
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:100%;pointer-events:none}
+  .val{color:var(--accent);font-variant-numeric:tabular-nums;font-weight:600}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-bottom:8px}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
+  .thumbs{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;max-height:120px;overflow:auto}
+  .thumb{width:40px;height:40px;border:1px solid var(--line);border-radius:5px;object-fit:contain;background:#0e1015}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <span class="logo">◆ AtlasForge</span>
+    <span class="sub">圖集裁切 · 重排 · 去空白</span>
+    <span class="spacer"></span>
+    <span id="modeBadge" class="pill">未載入</span>
+  </header>
+
+  <div class="main">
+    <!-- ===== 左側控制面板 ===== -->
+    <aside class="side">
+      <!-- 1. 輸入 -->
+      <div class="group">
+        <h2>① 輸入來源</h2>
+        <div class="seg two" id="inputMode">
+          <button data-v="sheet" class="on">已打包大圖</button>
+          <button data-v="frames">單張 frame</button>
+        </div>
+        <div class="hint" id="inputHint" style="margin-bottom:10px">
+          一張已排成格狀的圖集,工具會先切格。
+        </div>
+        <div class="drop" id="drop">
+          拖放圖片、貼上 (Ctrl+V),或 <b>點擊選擇</b><br>
+          <span class="hint">PNG / WebP,支援透明</span>
+        </div>
+        <input type="file" id="file" accept="image/*" multiple hidden>
+        <div class="thumbs" id="thumbs"></div>
+      </div>
+
+      <!-- 2. 切格(僅大圖模式) -->
+      <div class="group" id="sliceGroup">
+        <h2>② 切格</h2>
+        <div class="row">
+          <div class="field"><label>列 Rows</label><input type="number" id="rows" min="1" value="3"></div>
+          <div class="field"><label>行 Cols</label><input type="number" id="cols" min="1" value="6"></div>
+        </div>
+        <details id="regionDetails">
+          <summary>切格區域(外邊距 / 非整除微調)</summary>
+          <div class="row">
+            <div class="field"><label>起點 X</label><input type="number" id="gridX" value="0"></div>
+            <div class="field"><label>起點 Y</label><input type="number" id="gridY" value="0"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>總寬 W</label><input type="number" id="gridW" min="1" value="0"></div>
+            <div class="field"><label>總高 H</label><input type="number" id="gridH" min="1" value="0"></div>
+          </div>
+          <button class="mini" id="regionReset" style="width:100%">↺ 重設為整張圖</button>
+        </details>
+        <div class="row" style="margin-top:10px">
+          <button class="mini" id="autoGrid" style="flex:1">🔍 自動偵測格線</button>
+          <button class="mini" id="skipEmpty" style="flex:1" title="重排時略過全透明的 cell">略過空 cell:開</button>
+        </div>
+        <div class="hint" id="gridHint" style="margin-top:6px"></div>
+      </div>
+
+      <!-- 3. 模式 -->
+      <div class="group">
+        <h2>③ 重排模式</h2>
+        <div class="seg" id="packMode">
+          <button data-v="uniform" class="on">連續圖 (等大 cell)</button>
+          <button data-v="pack">整併 (最小 gap)</button>
+        </div>
+        <div class="hint" id="packHint" style="margin-top:6px">
+          取所有 frame 內容的<b>聯集外框</b>裁切,cell 仍等大但去除共同空白 → 動畫不跳。
+        </div>
+      </div>
+
+      <!-- 4. 參數 -->
+      <div class="group">
+        <h2>④ 參數</h2>
+        <div class="field">
+          <label>背景 / 內容判斷</label>
+          <div class="seg" id="bgMode">
+            <button data-v="auto" class="on">自動</button>
+            <button data-v="alpha">透明</button>
+            <button data-v="luma">黑底</button>
+          </div>
+          <div class="hint" id="bgHint" style="margin-top:4px">自動</div>
+        </div>
+        <div class="field">
+          <label>裁切閾值:<span class="val" id="alphaVal">10</span></label>
+          <input type="range" id="alpha" min="0" max="128" value="10">
+          <div class="hint">低於此值(透明度 / 亮度)視為空白,裁掉。</div>
+        </div>
+        <div class="field">
+          <label>Cell 間距 Gap (px):<span class="val" id="gapVal">2</span></label>
+          <input type="range" id="gap" min="0" max="16" value="2">
+        </div>
+        <div class="field" id="colsOutField">
+          <label>輸出每列數量 Columns</label>
+          <input type="number" id="colsOut" min="1" value="6">
+          <div class="hint">連續圖建議與原本行數一致,方便引擎讀。</div>
+        </div>
+        <div class="field" id="maxWField" style="display:none">
+          <label>最大寬度 Max Width (px)</label>
+          <input type="number" id="maxW" min="16" value="2048">
+        </div>
+        <label class="check" style="margin-bottom:8px">
+          <input type="checkbox" id="pot"> 貼齊 2 的次方 (POT)
+        </label>
+        <label class="check">
+          <input type="checkbox" id="extrude"> 邊緣擴邊 1px (防接縫)
+        </label>
+      </div>
+
+      <!-- 5. 輸出 -->
+      <div class="group">
+        <h2>⑤ 輸出</h2>
+        <div class="field">
+          <label>檔名</label>
+          <input type="text" id="outName" value="atlas">
+        </div>
+        <button class="btn" id="exportPng" disabled>⬇ 下載 PNG</button>
+        <div style="height:8px"></div>
+        <button class="btn ghost" id="exportJson" disabled>⬇ 下載 JSON metadata</button>
+      </div>
+    </aside>
+
+    <!-- ===== 右側預覽 ===== -->
+    <section class="stage">
+      <div class="stage-bar">
+        <span class="toolbar-label">預覽</span>
+        <div class="seg" id="viewMode" style="width:auto;flex:none">
+          <button data-v="result" class="on" style="padding:6px 12px">結果</button>
+          <button data-v="source" style="padding:6px 12px">原圖切格</button>
+        </div>
+        <label class="check"><input type="checkbox" id="showGrid" checked> 顯示 cell 框</label>
+        <label class="check"><input type="checkbox" id="showTrim"> 顯示裁切框</label>
+        <label class="check"><input type="checkbox" id="showResult" checked> 顯示省去空白範圍</label>
+        <span class="spacer" style="flex:1"></span>
+        <button class="mini" id="zoomFit" title="縮放至適合視窗 (或雙擊畫面)">Fit</button>
+        <label class="toolbar-label">縮放</label>
+        <input type="range" id="zoom" min="0.1" max="16" step="0.01" value="1" style="width:110px">
+        <input type="number" id="zoomInput" min="0.05" max="64" step="0.01" value="1.00" title="可直接輸入縮放值">
+        <span class="toolbar-label">×</span>
+      </div>
+      <div class="stage-view" id="stageView">
+        <div id="emptyMsg" class="empty">
+          從左側載入圖片開始。<br><br>
+          連續動畫圖 → 選「連續圖」模式;<br>
+          雜項資源整併 → 選「整併」模式。<br><br>
+          <span style="opacity:.7">滾輪縮放 · 拖曳平移 · 雙擊 Fit</span>
+        </div>
+        <canvas id="view" style="display:none"></canvas>
+        <canvas id="overlay"></canvas>
+      </div>
+      <!-- 統計 -->
+      <div class="stage-bar" style="border-top:1px solid var(--line);border-bottom:none">
+        <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:12px">
+          <div class="stat" style="border:none"><span>原始尺寸&nbsp;</span><b id="sOrig">—</b></div>
+          <div class="stat" style="border:none"><span>輸出尺寸&nbsp;</span><b id="sNew">—</b></div>
+          <div class="stat" style="border:none"><span>Cell 數&nbsp;</span><b id="sCells">—</b></div>
+          <div class="stat" style="border:none"><span>填充率&nbsp;</span><b id="sFill">—</b></div>
+          <div class="stat" style="border:none"><span>面積節省&nbsp;</span><b id="sSave" class="good">—</b></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 右側:動畫預覽 ===== -->
+    <section class="anim" id="animPanel">
+      <div class="anim-head">▶ 動畫預覽</div>
+      <div class="anim-view" id="animView">
+        <canvas id="animCanvas"></canvas>
+        <div id="animEmpty" class="anim-empty">載入連續圖後<br>在此逐格播放預覽</div>
+      </div>
+      <div class="anim-ctrl">
+        <div class="anim-row">
+          <button class="btn" id="animPlay" style="flex:none;width:auto;padding:8px 14px">▶ 播放</button>
+          <span class="anim-count" id="animCount">— / —</span>
+        </div>
+        <input type="range" id="animScrub" min="0" max="0" value="0" step="1" style="width:100%">
+        <div class="anim-row">
+          <label class="anim-lbl">FPS</label>
+          <input type="number" id="animFps" min="1" max="60" value="12" style="width:56px">
+          <label class="check" style="margin-left:auto"><input type="checkbox" id="animLoop" checked> 循環</label>
+        </div>
+        <div class="anim-row">
+          <label class="anim-lbl">底色</label>
+          <div class="seg" id="animBg" style="flex:1">
+            <button data-v="checker" class="on">棋盤</button>
+            <button data-v="dark">深</button>
+            <button data-v="light">淺</button>
+          </div>
+        </div>
+        <div class="hint" id="animHint">依 frame 順序還原每格在原始 cell 的位置播放,可檢查是否跳位。</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   AtlasForge — 純前端圖集工具
+   全部運算在瀏覽器 Canvas 上完成,不上傳任何檔案。
+   ========================================================================= */
+(() => {
+"use strict";
+
+const $ = id => document.getElementById(id);
+
+// ---- 全域狀態 ----
+const state = {
+  inputMode: "sheet",     // sheet | frames
+  packMode:  "uniform",   // uniform | pack
+  viewMode:  "result",    // result | source
+  sources:   [],          // 已載入的原始圖 {name, canvas, w, h}
+  cells:     [],          // 切格後的 cell {name, sx,sy,sw,sh, src(canvas), bbox}
+  result:    null,        // 最近一次重排結果 {canvas, frames, w, h, packedArea, usedArea}
+  skipEmpty: true,
+  bg:        "auto",      // auto | alpha | luma(使用者選擇)
+  bgResolved:"alpha",     // 實際採用的內容判斷模式(auto 解析後)
+  view:      { zoom:1, x:0, y:0 },  // 預覽 viewport 的縮放與平移
+  anim:      { playing:false, frame:0, fps:12, loop:true, raf:0, acc:0, lastT:0 },
+};
+
+// ============================ 影像工具 ============================
+
+/** 讀取 File → 回傳 {name, canvas, w, h} */
+function fileToSource(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      c.getContext("2d").drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      resolve({ name: file.name.replace(/\.[^.]+$/, ""), canvas: c, w: c.width, h: c.height });
+    };
+    img.onerror = e => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+/** 取單一像素的「內容值」(0~255)。
+ *  alpha 模式:用透明度(適合真透明背景)。
+ *  luma  模式:用亮度 max(r,g,b)(適合不透明黑底的 additive 特效圖,黑=空)。 */
+function cval(data, p, mode){
+  return mode === "luma" ? Math.max(data[p], data[p+1], data[p+2]) : data[p+3];
+}
+
+/** 解析目前要用的內容判斷模式。state.bg='auto' 時自動判斷:
+ *  看「邊框像素」的 alpha 中位數——邊框通常是背景。
+ *    邊框透明(alpha 低) → 真透明背景,用 alpha。
+ *    邊框不透明          → 黑底 additive 圖,用亮度(黑=空)。 */
+function resolveBg(canvas){
+  if (state.bg !== "auto") return state.bg;
+  const c = canvas.getContext("2d");
+  const { width:W, height:H } = canvas;
+  const data = c.getImageData(0, 0, W, H).data;
+  const s = [];
+  const stepX = Math.max(1, W >> 6), stepY = Math.max(1, H >> 6);
+  for (let x = 0; x < W; x += stepX){ s.push(data[x*4+3]); s.push(data[((H-1)*W+x)*4+3]); }
+  for (let y = 0; y < H; y += stepY){ s.push(data[(y*W)*4+3]); s.push(data[(y*W+W-1)*4+3]); }
+  s.sort((a,b)=>a-b);
+  const medBorderAlpha = s[s.length >> 1];
+  return medBorderAlpha < 32 ? "alpha" : "luma";
+}
+
+/** 在 canvas 的指定矩形區域內,依內容閾值求內容外框(cell-local 座標)。
+ *  找不到內容時回傳 null。 */
+function contentBBox(ctx, rx, ry, rw, rh, thr, mode){
+  const data = ctx.getImageData(rx, ry, rw, rh).data;
+  let minX = rw, minY = rh, maxX = -1, maxY = -1;
+  for (let y = 0; y < rh; y++){
+    for (let x = 0; x < rw; x++){
+      if (cval(data, (y*rw + x)*4, mode) > thr){
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  return { x:minX, y:minY, w:maxX-minX+1, h:maxY-minY+1 };
+}
+
+// ============================ 切格 ============================
+
+/** 依 rows×cols 均分大圖為 cells */
+function sliceGrid(src, rows, cols){
+  const ctx = src.canvas.getContext("2d");
+  const thr = +$("alpha").value;
+  const mode = state.bgResolved;
+  const g = gridRegion(src);   // {x,y,w,h} 切格區域
+  const cells = [];
+  for (let r = 0; r < rows; r++){
+    for (let c = 0; c < cols; c++){
+      // 用累積分界四捨五入,避免非整除時逐格漂移
+      const x0 = Math.round(g.x + g.w * c / cols),     x1 = Math.round(g.x + g.w * (c+1) / cols);
+      const y0 = Math.round(g.y + g.h * r / rows),     y1 = Math.round(g.y + g.h * (r+1) / rows);
+      const sx = clamp(x0, 0, src.w), sy = clamp(y0, 0, src.h);
+      const sw = clamp(x1, 0, src.w) - sx, sh = clamp(y1, 0, src.h) - sy;
+      const bbox = (sw > 0 && sh > 0) ? contentBBox(ctx, sx, sy, sw, sh, thr, mode) : null;
+      cells.push({
+        name: `${src.name}_${r*cols + c}`,
+        index: r*cols + c,
+        src: src.canvas, sx, sy, sw, sh,
+        bbox // cell-local,可能為 null(空 cell)
+      });
+    }
+  }
+  return cells;
+}
+
+function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+/** 目前的切格區域;欄位為 0/空 時代表整張圖 */
+function gridRegion(src){
+  let x = +$("gridX").value || 0, y = +$("gridY").value || 0;
+  let w = +$("gridW").value || 0, h = +$("gridH").value || 0;
+  x = clamp(x, 0, src.w); y = clamp(y, 0, src.h);
+  if (w <= 0) w = src.w - x;
+  if (h <= 0) h = src.h - y;
+  w = clamp(w, 1, src.w - x); h = clamp(h, 1, src.h - y);
+  return { x, y, w, h };
+}
+
+/** 把切格區域重設為整張圖 */
+function resetRegion(){
+  const s = state.sources[0];
+  $("gridX").value = 0; $("gridY").value = 0;
+  $("gridW").value = s ? s.w : 0; $("gridH").value = s ? s.h : 0;
+}
+
+/** 單張 frame → 各自成一個 cell */
+function framesToCells(sources){
+  const thr = +$("alpha").value;
+  const mode = state.bgResolved;
+  return sources.map((s, i) => {
+    const bbox = contentBBox(s.canvas.getContext("2d"), 0, 0, s.w, s.h, thr, mode);
+    return { name: s.name || `frame_${i}`, index: i, src: s.canvas,
+             sx:0, sy:0, sw:s.w, sh:s.h, bbox };
+  });
+}
+
+/** 自動偵測格線(頻域法)。
+ *  原理:規則圖集的內容沿 X/Y 軸以固定間距重複 → 在 alpha 投影上形成週期訊號。
+ *  即使 frame 之間彼此暈開、沒有任何空白分隔帶(火焰/煙霧這類軟邊 VFX),
+ *  只要有 T 個 cell,投影的基頻就會落在「T 個週期」上。做法:
+ *    1. 對每軸的 alpha 投影做線性去趨勢(移除整體漸暗/漸亮,避免洩漏到低頻)。
+ *    2. 逐一計算 c = 1..maxCount 個週期的 DFT 強度。
+ *    3. 強度最高的 c 即為該軸真正的 cell 數。
+ *  另回傳 conf(峰值突出度 = 峰值強度 / 平均強度),越高越可信;count=1 代表非格狀。 */
+function autoDetectGrid(src, minPitch = 24){
+  const thr = +$("alpha").value;
+  const mode = state.bgResolved;
+  const { w, h } = src;
+  const data = src.canvas.getContext("2d").getImageData(0, 0, w, h).data;
+  const colSum = new Float64Array(w), rowSum = new Float64Array(h);
+  for (let y = 0; y < h; y++){
+    for (let x = 0; x < w; x++){
+      const v = cval(data, (y*w + x)*4, mode);
+      if (v > thr){ colSum[x] += v; rowSum[y] += v; }
+    }
+  }
+  const detrend = a => {                     // 最小平方擬合一條直線後扣除
+    const N = a.length; let sx=0, sy=0, sxx=0, sxy=0;
+    for (let i=0;i<N;i++){ sx+=i; sy+=a[i]; sxx+=i*i; sxy+=i*a[i]; }
+    const den = N*sxx - sx*sx || 1;
+    const m = (N*sxy - sx*sy)/den, b = (sy - m*sx)/N;
+    const o = new Float64Array(N);
+    for (let i=0;i<N;i++) o[i] = a[i] - (m*i + b);
+    return o;
+  };
+  const axis = profile => {
+    const p = detrend(profile), N = p.length;
+    const maxCount = Math.max(1, Math.floor(N / minPitch));
+    if (maxCount < 2) return { count:1, conf:0 };
+    let best=1, bv=-1, sum=0;
+    for (let c=1;c<=maxCount;c++){
+      let re=0, im=0; const wc = 2*Math.PI*c/N;
+      for (let x=0;x<N;x++){ re += p[x]*Math.cos(wc*x); im -= p[x]*Math.sin(wc*x); }
+      const mag = Math.sqrt(re*re + im*im);
+      sum += mag;
+      if (mag > bv){ bv = mag; best = c; }
+    }
+    const meanMag = sum / maxCount;
+    return { count: best, conf: meanMag>0 ? +(bv/meanMag).toFixed(1) : 0 };
+  };
+  const cx = axis(colSum), ry = axis(rowSum);
+  return { cols: cx.count, rows: ry.count, colConf: cx.conf, rowConf: ry.conf };
+}
+
+/** 解析並顯示目前的內容判斷模式(透明 or 黑底亮度) */
+function updateBg(){
+  if (!state.sources.length) return;
+  state.bgResolved = resolveBg(state.sources[0].canvas);
+  const el = $("bgHint");
+  if (el){
+    const map = { alpha:"透明背景 (Alpha)", luma:"黑底 / 亮度 (Luminance)" };
+    el.textContent = (state.bg === "auto" ? "自動 → " : "") + map[state.bgResolved];
+  }
+}
+
+/** 偵測 → 直接套用到 UI 欄位。conf<2.5 視為不確定,提醒使用者核對。 */
+function applyAutoGrid(){
+  if (!state.sources.length) return null;
+  const g = autoDetectGrid(state.sources[0]);
+  $("rows").value = g.rows; $("cols").value = g.cols; $("colsOut").value = g.cols;
+  const conf = Math.min(g.colConf, g.rowConf);
+  const level = conf >= 4 ? "高" : conf >= 2.5 ? "中" : "低";
+  const warn = conf < 2.5 ? " ⚠ 不確定,請肉眼核對" : "";
+  $("gridHint").textContent = `自動偵測:${g.rows} 列 × ${g.cols} 行(可信度 ${level}${warn})`;
+  setView("source");                    // 立刻在原圖上顯示偵測到的格線,方便核對
+  $("showGrid").checked = true;
+  return g;
+}
+
+// ============================ 重排 ============================
+
+/** 連續圖模式:保留每個 cell 內部布局,只削掉「所有 frame 都空」的共同邊界。
+ *
+ *  關鍵:動畫每一格的內容在 cell 內位置不同,若各自置中會導致單格播放時內容跳位。
+ *  正確做法 —— 對每個 cell 的四個邊,量「可剃除距離」(cell 邊到內容邊的空白):
+ *      left = bbox.x, top = bbox.y,
+ *      right = cellW - (bbox.x+bbox.w), bottom = cellH - (bbox.y+bbox.h)
+ *  取所有 cell 每個邊的「最小可剃除距離」(最小公共值)當共同裁切量,
+ *  再用同一個矩形裁掉每一個 cell。每格內容的相對位置完全不變 → 播放不跳位。
+ *  (等價於「所有內容框在 cell 內座標的聯集」。)                                 */
+function packUniform(cells, opts){
+  const live = cells.filter(c => c.bbox || !opts.skipEmpty);
+  const withContent = cells.filter(c => c.bbox);
+  if (!withContent.length) return null;
+
+  // 參考 cell 尺寸(sheet 模式所有 cell 同大;frames 模式取最大,較小者靠左上對齊)
+  let refW = 0, refH = 0;
+  for (const c of live){ refW = Math.max(refW, c.sw); refH = Math.max(refH, c.sh); }
+
+  // 四邊共同可剃除距離 = 所有有內容 cell 的各邊可剃除距離取最小
+  let cropL = Infinity, cropT = Infinity, cropR = Infinity, cropB = Infinity;
+  for (const c of withContent){
+    const b = c.bbox;
+    cropL = Math.min(cropL, b.x);
+    cropT = Math.min(cropT, b.y);
+    cropR = Math.min(cropR, c.sw - (b.x + b.w));
+    cropB = Math.min(cropB, c.sh - (b.y + b.h));
+  }
+  cropL = Math.max(0, cropL); cropT = Math.max(0, cropT);
+  cropR = Math.max(0, cropR); cropB = Math.max(0, cropB);
+
+  // 統一輸出 cell 尺寸(裁掉共同邊界後)
+  const uw = Math.max(1, refW - cropL - cropR);
+  const uh = Math.max(1, refH - cropT - cropB);
+
+  const cols = Math.max(1, opts.colsOut || Math.ceil(Math.sqrt(live.length)));
+  const rows = Math.ceil(live.length / cols);
+  const gap = opts.gap;
+  let W = cols*uw + (cols-1)*gap;
+  let H = rows*uh + (rows-1)*gap;
+  if (opts.pot){ W = nextPOT(W); H = nextPOT(H); }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const g = canvas.getContext("2d");
+
+  // pivot:原 cell 中心在裁切後 cell 內的正規化位置(讓引擎定位維持不變)
+  const pivot = { x:+((refW/2 - cropL)/uw).toFixed(6), y:+((refH/2 - cropT)/uh).toFixed(6) };
+
+  const frames = [];
+  live.forEach((c, i) => {
+    const col = i % cols, row = (i / cols) | 0;
+    const px = col*(uw + gap), py = row*(uh + gap);
+    // 從每個 cell 的同一個矩形 (cropL,cropT,uw,uh) 取出貼上 → 布局零位移
+    const sw = Math.min(uw, c.sw - cropL), sh = Math.min(uh, c.sh - cropT);
+    if (sw > 0 && sh > 0){
+      g.drawImage(c.src, c.sx + cropL, c.sy + cropT, sw, sh, px, py, sw, sh);
+      if (opts.extrude) extrude(g, px, py, sw, sh);
+    }
+    frames.push({
+      index: c.index, name: c.name,
+      frame: { x:px, y:py, w:uw, h:uh },
+      rotated:false, trimmed:true,
+      // 這格內容在原始 cell 的位置(供引擎還原原始 refW×refH 畫布內的定位)
+      spriteSourceSize: { x:cropL, y:cropT, w:uw, h:uh },
+      sourceSize: { w:refW, h:refH },
+      pivot
+    });
+  });
+
+  return { canvas, frames, w:W, h:H,
+           usedArea: uw*uh*live.length, cellW:uw, cellH:uh, cols, rows,
+           crop: { left:cropL, top:cropT, right:cropR, bottom:cropB } };
+}
+
+/** 整併模式:各 cell 依自身 bbox 裁切,MaxRects 裝箱。 */
+function packBin(cells, opts){
+  const items = cells.filter(c => c.bbox).map(c => ({
+    cell:c, w:c.bbox.w + opts.gap, h:c.bbox.h + opts.gap, // 內含 gap 邊
+    bw:c.bbox.w, bh:c.bbox.h
+  }));
+  if (!items.length) return null;
+
+  // 由高到矮排,較穩定
+  items.sort((a,b) => b.h - a.h || b.w - a.w);
+
+  const maxW = opts.maxW || 2048;
+  const packer = new MaxRects(maxW, 8192);
+  let usedArea = 0, maxX = 0, maxY = 0;
+  for (const it of items){
+    const pos = packer.insert(it.w, it.h);
+    if (!pos){ continue; }
+    it.x = pos.x; it.y = pos.y;
+    usedArea += it.bw * it.bh;
+    maxX = Math.max(maxX, pos.x + it.w);
+    maxY = Math.max(maxY, pos.y + it.h);
+  }
+  let W = maxX, H = maxY;
+  if (opts.pot){ W = nextPOT(W); H = nextPOT(H); }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W || 1; canvas.height = H || 1;
+  const g = canvas.getContext("2d");
+  const frames = [];
+  for (const it of items){
+    if (it.x === undefined) continue;
+    const c = it.cell, b = c.bbox;
+    g.drawImage(c.src, c.sx + b.x, c.sy + b.y, b.w, b.h, it.x, it.y, b.w, b.h);
+    if (opts.extrude) extrude(g, it.x, it.y, b.w, b.h);
+    frames.push({
+      index: c.index, name: c.name,
+      frame: { x:it.x, y:it.y, w:b.w, h:b.h },
+      rotated:false, trimmed:true,
+      spriteSourceSize: { x:b.x, y:b.y, w:b.w, h:b.h },
+      sourceSize: { w:c.sw, h:c.sh },
+      pivot: { x:0.5, y:0.5 }
+    });
+  }
+  return { canvas, frames, w:W, h:H, usedArea };
+}
+
+/** 把 sprite 邊緣往外複製 1px,避免縮放取樣時吃到透明鄰邊 */
+function extrude(g, x, y, w, h){
+  if (w<=0||h<=0) return;
+  g.drawImage(g.canvas, x,     y, w, 1, x,     y-1, w, 1); // top
+  g.drawImage(g.canvas, x, y+h-1, w, 1, x,   y+h, w, 1);   // bottom
+  g.drawImage(g.canvas, x,     y, 1, h, x-1,   y, 1, h);   // left
+  g.drawImage(g.canvas, x+w-1, y, 1, h, x+w,   y, 1, h);   // right
+}
+
+function nextPOT(n){ let p = 1; while (p < n) p <<= 1; return p; }
+
+// -------- MaxRects (Best Short Side Fit) --------
+class MaxRects{
+  constructor(w, h){ this.free = [{x:0,y:0,w,h}]; }
+  insert(w, h){
+    let best = null, bestShort = Infinity, bestLong = Infinity;
+    for (const f of this.free){
+      if (f.w >= w && f.h >= h){
+        const leftover = [Math.abs(f.w-w), Math.abs(f.h-h)];
+        const shortSide = Math.min(...leftover), longSide = Math.max(...leftover);
+        if (shortSide < bestShort || (shortSide === bestShort && longSide < bestLong)){
+          best = {x:f.x, y:f.y, w, h}; bestShort = shortSide; bestLong = longSide;
+        }
+      }
+    }
+    if (!best) return null;
+    this.place(best);
+    return best;
+  }
+  place(node){
+    const next = [];
+    for (const f of this.free){
+      if (this.overlap(f, node)) next.push(...this.split(f, node));
+      else next.push(f);
+    }
+    this.free = next;
+    this.prune();
+  }
+  overlap(a, b){
+    return !(b.x >= a.x+a.w || b.x+b.w <= a.x || b.y >= a.y+a.h || b.y+b.h <= a.y);
+  }
+  split(f, n){
+    const out = [];
+    if (n.x < f.x+f.w && n.x+n.w > f.x){
+      if (n.y > f.y)            out.push({x:f.x, y:f.y, w:f.w, h:n.y-f.y});
+      if (n.y+n.h < f.y+f.h)    out.push({x:f.x, y:n.y+n.h, w:f.w, h:f.y+f.h-(n.y+n.h)});
+    }
+    if (n.y < f.y+f.h && n.y+n.h > f.y){
+      if (n.x > f.x)            out.push({x:f.x, y:f.y, w:n.x-f.x, h:f.h});
+      if (n.x+n.w < f.x+f.w)    out.push({x:n.x+n.w, y:f.y, w:f.x+f.w-(n.x+n.w), h:f.h});
+    }
+    return out;
+  }
+  prune(){
+    for (let i=0;i<this.free.length;i++){
+      for (let j=i+1;j<this.free.length;j++){
+        if (this.contains(this.free[j], this.free[i])){ this.free.splice(i,1); i--; break; }
+        if (this.contains(this.free[i], this.free[j])){ this.free.splice(j,1); j--; }
+      }
+    }
+  }
+  contains(a, b){ return a.x<=b.x && a.y<=b.y && a.x+a.w>=b.x+b.w && a.y+a.h>=b.y+b.h; }
+}
+
+// ============================ 主流程 ============================
+
+function rebuildCells(){
+  if (!state.sources.length){ state.cells = []; return; }
+  if (state.inputMode === "sheet"){
+    state.cells = sliceGrid(state.sources[0], +$("rows").value, +$("cols").value);
+  } else {
+    state.cells = framesToCells(state.sources);
+  }
+}
+
+function process(){
+  rebuildCells();
+  if (!state.cells.length){ state.result = null; render(); updateStats(); updateAnim(); return; }
+  const opts = {
+    gap: +$("gap").value,
+    colsOut: +$("colsOut").value,
+    maxW: +$("maxW").value,
+    pot: $("pot").checked,
+    extrude: $("extrude").checked,
+    skipEmpty: state.skipEmpty,
+  };
+  state.result = state.packMode === "uniform"
+    ? packUniform(state.cells, opts)
+    : packBin(state.cells, opts);
+  render();
+  updateStats();
+  updateAnim();
+}
+
+// ============================ 繪製預覽 ============================
+
+function render(){
+  const canvas = $("view");
+  const empty = $("emptyMsg");
+
+  if (state.viewMode === "result"){
+    if (!state.result){ canvas.style.display="none"; empty.style.display="block"; return; }
+    empty.style.display="none"; canvas.style.display="block";
+    canvas.width = state.result.w; canvas.height = state.result.h;
+    const g = canvas.getContext("2d");
+    g.clearRect(0,0,canvas.width,canvas.height);
+    g.drawImage(state.result.canvas, 0, 0);
+  } else {
+    // 原圖切格預覽
+    if (!state.sources.length || !state.cells.length){
+      canvas.style.display="none"; empty.style.display="block"; return;
+    }
+    empty.style.display="none"; canvas.style.display="block";
+    const s = state.inputMode === "sheet" ? state.sources[0] : null;
+    if (s){
+      canvas.width = s.w; canvas.height = s.h;
+      const g = canvas.getContext("2d");
+      g.clearRect(0,0,canvas.width,canvas.height);
+      g.drawImage(s.canvas, 0, 0);
+    } else {
+      renderFramesSource(canvas);   // frames 模式:平鋪顯示
+    }
+  }
+  applyView();   // 尺寸畫好後套用目前 viewport 變換(內含邊框覆蓋層)
+}
+
+// ============================ Viewport(縮放 / 平移) ============================
+
+function clampZoom(z){ return Math.min(64, Math.max(0.05, z)); }
+
+/** 把目前的 zoom/pan 套到 canvas,並同步右上角滑桿與輸入框 */
+function applyView(){
+  const v = state.view;
+  $("view").style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
+  const zi = $("zoomInput");
+  if (zi && document.activeElement !== zi) zi.value = v.zoom.toFixed(2);
+  const zs = $("zoom");
+  if (zs) zs.value = Math.min(+zs.max, Math.max(+zs.min, v.zoom));
+  drawOverlayLayer();   // 邊框覆蓋層跟著 pan/zoom 重畫(固定螢幕像素寬度)
+}
+
+/** 以 (ax,ay)(stage-view 內座標,預設中心)為錨點縮放,錨點下的內容位置不動 */
+function setZoom(z, ax, ay){
+  const v = state.view;
+  z = clampZoom(z);
+  const r = $("stageView").getBoundingClientRect();
+  if (ax == null){ ax = r.width/2; ay = r.height/2; }
+  const cx = (ax - v.x) / v.zoom, cy = (ay - v.y) / v.zoom;
+  v.zoom = z;
+  v.x = ax - cx*z; v.y = ay - cy*z;
+  applyView();
+}
+
+/** 縮放至適合視窗並置中 */
+function fitView(){
+  const c = $("view");
+  if (!c.width || c.style.display === "none") return;
+  const r = $("stageView").getBoundingClientRect();
+  if (r.width < 10 || r.height < 10){          // 尚未完成排版 → 用預設,稍後再試
+    state.view = { zoom:1, x:0, y:0 }; applyView();
+    requestAnimationFrame(() => { if ($("stageView").getBoundingClientRect().width >= 10) fitView(); });
+    return;
+  }
+  const pad = 32;
+  const z = clampZoom(Math.min((r.width - pad)/c.width, (r.height - pad)/c.height));
+  state.view.zoom = z;
+  state.view.x = (r.width - c.width*z) / 2;
+  state.view.y = (r.height - c.height*z) / 2;
+  applyView();
+}
+
+// ============================ 動畫預覽 ============================
+
+/** 取得播放用的 frame 清單,依原始 cell 順序(index)排序 */
+function animFrames(){
+  if (!state.result || !state.result.frames.length) return null;
+  return [...state.result.frames].sort((a, b) => a.index - b.index);
+}
+
+/** 畫出目前這一格:還原到原始 cell 尺寸(sourceSize),內容放在其原始位置 → 忠實反映播放時的定位 */
+function drawAnimFrame(){
+  const frames = animFrames();
+  const cvs = $("animCanvas"), empty = $("animEmpty");
+  if (!frames){ cvs.style.display = "none"; empty.style.display = "block"; return; }
+  empty.style.display = "none"; cvs.style.display = "block";
+  const a = state.anim;
+  a.frame = clamp(a.frame, 0, frames.length - 1);
+  const f = frames[a.frame];
+  const sw = f.sourceSize.w, sh = f.sourceSize.h;
+  if (cvs.width !== sw || cvs.height !== sh){ cvs.width = sw; cvs.height = sh; }
+  const g = cvs.getContext("2d");
+  g.clearRect(0, 0, sw, sh);
+  const t = f.spriteSourceSize;
+  g.drawImage(state.result.canvas, f.frame.x, f.frame.y, f.frame.w, f.frame.h, t.x, t.y, f.frame.w, f.frame.h);
+  $("animScrub").value = a.frame;
+  $("animCount").textContent = `${a.frame + 1} / ${frames.length}`;
+}
+
+/** result 改變後刷新播放器(clamp、scrubber 範圍、重畫) */
+function updateAnim(){
+  const frames = animFrames();
+  const a = state.anim;
+  if (!frames){ stopAnim(); a.frame = 0; }
+  $("animScrub").max = frames ? frames.length - 1 : 0;
+  if (frames) a.frame = a.frame % frames.length;
+  drawAnimFrame();
+  $("animPlay").disabled = !frames;
+}
+
+function animLoop(t){
+  const a = state.anim, frames = animFrames();
+  if (!a.playing || !frames){ return; }
+  if (a.lastT == null) a.lastT = t;      // 用 null 當未設定,避免時間戳為 0 時誤判
+  a.acc += t - a.lastT; a.lastT = t;
+  const spf = 1000 / a.fps;
+  if (a.acc >= spf){
+    const adv = Math.floor(a.acc / spf); a.acc -= adv * spf;
+    let nf = a.frame + adv;
+    if (nf >= frames.length){
+      if (a.loop) nf %= frames.length;
+      else { nf = frames.length - 1; a.frame = nf; drawAnimFrame(); stopAnim(); return; }
+    }
+    a.frame = nf; drawAnimFrame();
+  }
+  a.raf = requestAnimationFrame(animLoop);
+}
+
+function playAnim(){
+  const frames = animFrames(); if (!frames) return;
+  const a = state.anim;
+  a.playing = true; a.lastT = null; a.acc = 0;
+  $("animPlay").textContent = "⏸ 暫停";
+  a.raf = requestAnimationFrame(animLoop);
+}
+function stopAnim(){
+  const a = state.anim;
+  a.playing = false; if (a.raf) cancelAnimationFrame(a.raf); a.raf = 0;
+  $("animPlay").textContent = "▶ 播放";
+}
+function toggleAnim(){ state.anim.playing ? stopAnim() : playAnim(); }
+
+function renderFramesSource(canvas){
+  // 把單張 frames 平鋪(只畫影像,不畫邊框;邊框在覆蓋層畫)
+  const per = Math.ceil(Math.sqrt(state.cells.length));
+  let cw = 0, ch = 0;
+  for (const c of state.cells){ cw = Math.max(cw, c.sw); ch = Math.max(ch, c.sh); }
+  const cols = per, rows = Math.ceil(state.cells.length/per), pad = 4;
+  canvas.width = cols*(cw+pad); canvas.height = rows*(ch+pad);
+  const g = canvas.getContext("2d");
+  g.clearRect(0,0,canvas.width,canvas.height);
+  const tiles = [];
+  state.cells.forEach((c,i)=>{
+    const x=(i%cols)*(cw+pad), y=((i/cols)|0)*(ch+pad);
+    g.drawImage(c.src, c.sx, c.sy, c.sw, c.sh, x, y, c.sw, c.sh);
+    tiles.push({ cell:c, x, y });
+  });
+  state._framesLayout = { tiles };
+}
+
+/* =========================================================================
+   邊框覆蓋層:畫在獨立的螢幕解析度 canvas 上,不隨影像一起被縮放。
+   線寬固定為螢幕像素 → 任何縮放都清晰、不會忽粗忽細或消失。
+   ========================================================================= */
+function drawOverlayLayer(){
+  const ov = $("overlay"); if (!ov) return;
+  const sv = $("stageView");
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.max(1, sv.clientWidth), H = Math.max(1, sv.clientHeight);
+  if (ov.width !== Math.round(W*dpr) || ov.height !== Math.round(H*dpr)){
+    ov.width = Math.round(W*dpr); ov.height = Math.round(H*dpr);
+    ov.style.width = W+"px"; ov.style.height = H+"px";
+  }
+  const g = ov.getContext("2d");
+  g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,W,H);
+  if (!state.sources.length || $("view").style.display === "none") return;
+
+  const v = state.view;
+  const SX = cx => v.x + cx*v.zoom;      // 內容像素 → 螢幕 CSS 像素
+  const SY = cy => v.y + cy*v.zoom;
+
+  // 一條清晰的軸對齊線段(座標已是 CSS 像素);奇數線寬對齊到半像素
+  const seg = (x0,y0,x1,y1,color,lw,halo) => {
+    g.beginPath();
+    if (x0 === x1){ const X = (lw%2 ? Math.round(x0)+0.5 : Math.round(x0)); g.moveTo(X,Math.round(y0)); g.lineTo(X,Math.round(y1)); }
+    else if (y0 === y1){ const Y = (lw%2 ? Math.round(y0)+0.5 : Math.round(y0)); g.moveTo(Math.round(x0),Y); g.lineTo(Math.round(x1),Y); }
+    else { g.moveTo(x0,y0); g.lineTo(x1,y1); }
+    if (halo){ g.lineWidth = lw+2; g.strokeStyle = halo; g.stroke(); }
+    g.lineWidth = lw; g.strokeStyle = color; g.stroke();
+  };
+  // 內容座標下的矩形框(以 4 條清晰線段畫)
+  const box = (cx,cy,cw,ch,color,lw=1,halo) => {
+    const x0=SX(cx), y0=SY(cy), x1=SX(cx+cw), y1=SY(cy+ch);
+    seg(x0,y0,x1,y0,color,lw,halo); seg(x1,y0,x1,y1,color,lw,halo);
+    seg(x1,y1,x0,y1,color,lw,halo); seg(x0,y1,x0,y0,color,lw,halo);
+  };
+  const fill = (cx,cy,cw,ch,color) => {
+    const x0=Math.round(SX(cx)), y0=Math.round(SY(cy)), x1=Math.round(SX(cx+cw)), y1=Math.round(SY(cy+ch));
+    g.fillStyle = color; g.fillRect(x0,y0,x1-x0,y1-y0);
+  };
+  const CYAN="rgba(90,200,250,.9)", ORANGE="rgba(240,137,78,.95)",
+        YELLOW="rgba(242,193,78,.95)", HALO="rgba(0,0,0,.55)",
+        RED="rgba(240,102,90,.14)",      // 全空 cell 的淡紅底
+        TRIM_RED="rgba(232,52,52,.5)";   // 省去空白範圍(50% 半透明)
+
+  // ---- 結果檢視 ----
+  if (state.viewMode === "result"){
+    if (!state.result) return;
+    if ($("showGrid").checked) for (const f of state.result.frames) box(f.frame.x,f.frame.y,f.frame.w,f.frame.h,CYAN,1);
+    if ($("showTrim").checked) for (const f of state.result.frames){ const t=f.spriteSourceSize; box(f.frame.x+t.x,f.frame.y+t.y,t.w,t.h,ORANGE,1); }
+    return;
+  }
+
+  // ---- 原圖切格檢視 ----
+  if (!state.cells.length) return;
+  if (state.inputMode === "sheet"){
+    const s = state.sources[0], reg = gridRegion(s);
+    const cols = Math.max(1,+$("cols").value), rows = Math.max(1,+$("rows").value);
+    for (const c of state.cells) if (!c.bbox) fill(c.sx,c.sy,c.sw,c.sh,RED);
+    if ($("showTrim").checked) for (const c of state.cells) if (c.bbox) box(c.sx+c.bbox.x,c.sy+c.bbox.y,c.bbox.w,c.bbox.h,ORANGE,1);
+    // 省去空白範圍:每個 cell 會被共同剃除的四邊空白,以紅色 50% 半透明填色標示
+    if (state.packMode === "uniform" && $("showResult").checked){
+      const wc = state.cells.filter(c=>c.bbox);
+      if (wc.length){
+        let cl=Infinity,ct=Infinity,cr=Infinity,cb=Infinity;
+        for (const c of wc){ const b=c.bbox;
+          cl=Math.min(cl,b.x); ct=Math.min(ct,b.y);
+          cr=Math.min(cr,c.sw-(b.x+b.w)); cb=Math.min(cb,c.sh-(b.y+b.h)); }
+        cl=Math.max(0,cl);ct=Math.max(0,ct);cr=Math.max(0,cr);cb=Math.max(0,cb);
+        for (const c of state.cells){
+          const ih = c.sh-ct-cb;
+          if (ct>0) fill(c.sx, c.sy, c.sw, ct, TRIM_RED);               // 上
+          if (cb>0) fill(c.sx, c.sy+c.sh-cb, c.sw, cb, TRIM_RED);       // 下
+          if (cl>0) fill(c.sx, c.sy+ct, cl, ih, TRIM_RED);             // 左
+          if (cr>0) fill(c.sx+c.sw-cr, c.sy+ct, cr, ih, TRIM_RED);     // 右
+        }
+      }
+    }
+    if ($("showGrid").checked){
+      for (let c=0;c<=cols;c++){ const x=SX(reg.x+reg.w*c/cols); seg(x,SY(reg.y),x,SY(reg.y+reg.h),CYAN,1,HALO); }
+      for (let r=0;r<=rows;r++){ const y=SY(reg.y+reg.h*r/rows); seg(SX(reg.x),y,SX(reg.x+reg.w),y,CYAN,1,HALO); }
+      box(reg.x,reg.y,reg.w,reg.h,YELLOW,2);   // 切格區域外框
+    }
+  } else {
+    const L = state._framesLayout; if (!L) return;
+    for (const t of L.tiles){ const c=t.cell;
+      if ($("showGrid").checked) box(t.x,t.y,c.sw,c.sh,CYAN,1);
+      if ($("showTrim").checked && c.bbox) box(t.x+c.bbox.x,t.y+c.bbox.y,c.bbox.w,c.bbox.h,ORANGE,1);
+    }
+  }
+}
+
+// ============================ 統計 ============================
+
+function updateStats(){
+  const r = state.result;
+  const orig = state.sources.length
+    ? state.sources.reduce((a,s)=>a + s.w*s.h, 0) : 0;
+  const origStr = state.inputMode==="sheet" && state.sources[0]
+    ? `${state.sources[0].w}×${state.sources[0].h}`
+    : `${state.sources.length} 張`;
+  $("sOrig").textContent = origStr;
+  if (!r){ $("sNew").textContent="—"; $("sCells").textContent="—"; $("sFill").textContent="—"; $("sSave").textContent="—"; return; }
+  const area = r.w*r.h;
+  const fill = area ? (r.usedArea/area*100) : 0;
+  $("sNew").textContent = `${r.w}×${r.h}`;
+  $("sCells").textContent = r.frames.length;
+  $("sFill").textContent = fill.toFixed(1)+"%";
+  const fillEl = $("sFill"); fillEl.className = fill>60?"good":(fill>35?"bad":"");
+  if (orig){
+    const save = (1 - area/orig)*100;
+    $("sSave").textContent = (save>=0?"−":"+") + Math.abs(save).toFixed(1)+"%";
+    $("sSave").className = save>=0 ? "good":"bad";
+  } else $("sSave").textContent = "—";
+}
+
+// ============================ 匯出 ============================
+
+function exportPNG(){
+  if (!state.result) return;
+  state.result.canvas.toBlob(b => download(b, $("outName").value + ".png"));
+}
+
+function exportJSON(){
+  if (!state.result) return;
+  const r = state.result;
+  const meta = {
+    meta: {
+      app: "AtlasForge", version: "1.0",
+      image: $("outName").value + ".png",
+      mode: state.packMode,
+      size: { w:r.w, h:r.h },
+      gap: +$("gap").value,
+      trimAlphaThreshold: +$("alpha").value,
+      scale: 1,
+      generated: new Date().toISOString()
+    },
+    // 陣列與物件兩種索引皆給,方便不同引擎讀取
+    frames: r.frames.map(f => ({
+      filename: f.name,
+      index: f.index,
+      frame: f.frame,
+      rotated: f.rotated,
+      trimmed: f.trimmed,
+      spriteSourceSize: f.spriteSourceSize,
+      sourceSize: f.sourceSize,
+      pivot: f.pivot
+    }))
+  };
+  download(new Blob([JSON.stringify(meta, null, 2)], {type:"application/json"}),
+           $("outName").value + ".json");
+}
+
+function download(blob, name){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+
+// ============================ 事件綁定 ============================
+
+// 載入
+async function handleFiles(files){
+  const imgs = [...files].filter(f => f.type.startsWith("image/"));
+  if (!imgs.length) return;
+  try{
+    const loaded = await Promise.all(imgs.map(fileToSource));
+    if (state.inputMode === "sheet"){
+      state.sources = [loaded[0]]; // 大圖只取第一張
+    } else {
+      state.sources = loaded;
+    }
+    renderThumbs();
+    updateBg();                                        // 判斷透明背景 or 黑底亮度
+    resetRegion();                                     // 切格區域預設為整張圖
+    if (state.inputMode === "sheet") applyAutoGrid();  // 載入即自動切格
+    $("exportPng").disabled = false;
+    $("exportJson").disabled = false;
+    process();
+    fitView();                                         // 載入後自動縮放至適合視窗
+  }catch(e){ alert("圖片載入失敗:"+e); }
+}
+
+function renderThumbs(){
+  const box = $("thumbs"); box.innerHTML = "";
+  state.sources.forEach(s => {
+    const img = new Image(); img.className="thumb"; img.src = s.canvas.toDataURL();
+    box.appendChild(img);
+  });
+}
+
+const drop = $("drop");
+drop.addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", e => handleFiles(e.target.files));
+["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("hot"); }));
+["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("hot"); }));
+drop.addEventListener("drop", e => handleFiles(e.dataTransfer.files));
+// 整頁拖放
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => { e.preventDefault(); if (e.target!==$("file")) handleFiles(e.dataTransfer.files); });
+
+// 貼上(Ctrl+V):從剪貼簿讀圖片
+window.addEventListener("paste", e => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  const files = [];
+  for (const it of items){
+    if (it.kind === "file" && it.type && it.type.startsWith("image/")){
+      const f = it.getAsFile(); if (f) files.push(f);
+    }
+  }
+  if (files.length){ e.preventDefault(); handleFiles(files); }  // 有圖才攔截,純文字不影響輸入框
+});
+
+// 分段切換
+function bindSeg(id, key, after){
+  $(id).querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    $(id).querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on"); state[key] = b.dataset.v; after && after();
+  }));
+}
+bindSeg("inputMode","inputMode", () => {
+  const sheet = state.inputMode==="sheet";
+  $("sliceGroup").style.display = sheet ? "block":"none";
+  $("inputHint").innerHTML = sheet
+    ? "一張已排成格狀的圖集,工具會先切格。"
+    : "一次選多張單獨的 frame,工具各自裁切後打包。";
+  state.sources = []; state.cells = []; state.result = null;
+  $("thumbs").innerHTML=""; $("exportPng").disabled=true; $("exportJson").disabled=true;
+  render(); updateStats();
+});
+bindSeg("packMode","packMode", () => {
+  const uni = state.packMode==="uniform";
+  $("packHint").innerHTML = uni
+    ? "取所有 frame 內容的<b>聯集外框</b>裁切,cell 仍等大但去除共同空白 → 動畫不跳。"
+    : "各 sprite 裁到自身最小外框,再用 MaxRects 裝箱,gap 最小、面積最省。";
+  $("colsOutField").style.display = uni ? "block":"none";
+  $("maxWField").style.display = uni ? "none":"block";
+  updateModeBadge();
+  process();
+});
+bindSeg("viewMode","viewMode", render);
+bindSeg("bgMode","bg", () => {
+  if (!state.sources.length){ updateBg(); return; }
+  updateBg();
+  if (state.inputMode === "sheet") applyAutoGrid();   // 換判斷模式 → 重新偵測格線
+  process();
+});
+
+/** 切換右側預覽模式(同步分段按鈕外觀) */
+function setView(v){
+  state.viewMode = v;
+  $("viewMode").querySelectorAll("button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === v));
+  render();
+}
+
+$("autoGrid").addEventListener("click", () => {
+  if (!state.sources.length){ alert("請先載入大圖"); return; }
+  applyAutoGrid();
+  process();
+});
+$("skipEmpty").addEventListener("click", () => {
+  state.skipEmpty = !state.skipEmpty;
+  $("skipEmpty").textContent = "略過空 cell:" + (state.skipEmpty?"開":"關");
+  process();
+});
+
+// 參數即時更新
+["rows","cols","gap","colsOut","maxW","alpha","gridX","gridY","gridW","gridH"].forEach(id =>
+  $(id).addEventListener("input", () => { syncLabels(); process(); }));
+["pot","extrude"].forEach(id => $(id).addEventListener("change", process));
+["showGrid","showTrim","showResult"].forEach(id => $(id).addEventListener("change", render));
+$("regionReset").addEventListener("click", () => { resetRegion(); process(); });
+
+// ---- 動畫預覽控制 ----
+$("animPlay").addEventListener("click", toggleAnim);
+$("animScrub").addEventListener("input", () => {
+  stopAnim(); state.anim.frame = +$("animScrub").value; drawAnimFrame();
+});
+$("animFps").addEventListener("input", () => {
+  state.anim.fps = clamp(+$("animFps").value || 12, 1, 60);
+});
+$("animLoop").addEventListener("change", () => { state.anim.loop = $("animLoop").checked; });
+bindSeg("animBg", "_animBg", () => {
+  const v = state._animBg;
+  $("animView").classList.toggle("bg-dark", v === "dark");
+  $("animView").classList.toggle("bg-light", v === "light");
+});
+
+// ---- Viewport 縮放 / 平移 ----
+$("zoom").addEventListener("input", () => setZoom(+$("zoom").value));
+$("zoomInput").addEventListener("change", () => {
+  const z = parseFloat($("zoomInput").value);
+  if (!isNaN(z)) setZoom(z);
+});
+$("zoomInput").addEventListener("keydown", e => { if (e.key === "Enter") $("zoomInput").blur(); });
+$("zoomFit").addEventListener("click", fitView);
+
+(() => {
+  const sv = $("stageView");
+  // 滾輪:對準游標縮放
+  sv.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = sv.getBoundingClientRect();
+    const factor = Math.pow(1.0015, -e.deltaY);   // 平滑,任意滾輪解析度皆可
+    setZoom(state.view.zoom * factor, e.clientX - r.left, e.clientY - r.top);
+  }, { passive:false });
+  // 拖曳:平移
+  let panning = false, lx = 0, ly = 0;
+  sv.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    panning = true; lx = e.clientX; ly = e.clientY;
+    sv.classList.add("panning"); sv.setPointerCapture(e.pointerId);
+  });
+  sv.addEventListener("pointermove", e => {
+    if (!panning) return;
+    state.view.x += e.clientX - lx; state.view.y += e.clientY - ly;
+    lx = e.clientX; ly = e.clientY; applyView();
+  });
+  const end = () => { panning = false; sv.classList.remove("panning"); };
+  sv.addEventListener("pointerup", end);
+  sv.addEventListener("pointercancel", end);
+  // 雙擊:Fit
+  sv.addEventListener("dblclick", fitView);
+})();
+// 視窗尺寸改變 → 重畫覆蓋層(同步其解析度)
+window.addEventListener("resize", () => { if (state.sources.length) applyView(); });
+
+$("exportPng").addEventListener("click", exportPNG);
+$("exportJson").addEventListener("click", exportJSON);
+
+function syncLabels(){
+  $("alphaVal").textContent = $("alpha").value;
+  $("gapVal").textContent = $("gap").value;
+}
+function updateModeBadge(){
+  $("modeBadge").textContent = state.sources.length
+    ? (state.packMode==="uniform" ? "連續圖模式" : "整併模式")
+    : "未載入";
+}
+
+// 初始
+syncLabels(); updateModeBadge();
+$("skipEmpty").textContent = "略過空 cell:開";
+state._animBg = "checker";
+updateAnim();   // 設定播放器初始狀態(顯示提示、停用按鈕)
+
+// 對外掛勾:供自動化 / 批次腳本使用(例:AtlasForge.loadFromURLs([...]) )
+window.AtlasForge = {
+  state, process, render, updateStats,
+  autoDetectGrid, sliceGrid, framesToCells, contentBBox, resolveBg, updateBg,
+  animLoop, drawAnimFrame, playAnim, stopAnim,   // 供測試 / 自動化
+  applyView, setZoom, fitView, drawOverlayLayer,
+  async loadFromURLs(urls){
+    const src = await Promise.all(urls.map(async u => {
+      const blob = await (await fetch(u)).blob();
+      return fileToSource(new File([blob], (u.split("/").pop()||"img")));
+    }));
+    state.sources = state.inputMode === "sheet" ? [src[0]] : src;
+    renderThumbs();
+    updateBg();
+    resetRegion();
+    if (state.inputMode === "sheet") applyAutoGrid();
+    $("exportPng").disabled = false; $("exportJson").disabled = false;
+    updateModeBadge(); process(); fitView();
+    return state.result && { w:state.result.w, h:state.result.h, frames:state.result.frames.length };
+  }
+};
+})();
+</script>
+</body>
+</html>
