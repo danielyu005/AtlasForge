@@ -257,9 +257,11 @@
           <label>檔名</label>
           <input type="text" id="outName" value="atlas">
         </div>
-        <button class="btn" id="exportPng" disabled>⬇ 下載 PNG</button>
-        <div style="height:8px"></div>
-        <button class="btn ghost" id="exportJson" disabled>⬇ 下載 JSON metadata</button>
+        <button class="btn" id="exportPng" disabled>⬇ 單張圖集 (PNG)</button>
+        <div class="hint" style="margin:4px 0 10px">整張圖集 + 可另存 JSON metadata。</div>
+        <button class="btn" id="exportZip" disabled>⬇ 影格序列 (ZIP)</button>
+        <div class="hint" style="margin:4px 0 10px">每格輸出成一張 PNG,打包成 ZIP(含 frames.json)。</div>
+        <button class="btn ghost" id="exportJson" disabled>⬇ JSON metadata</button>
       </div>
     </aside>
 
@@ -1118,6 +1120,88 @@ function download(blob, name){
   setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 }
 
+// ---- 影格序列輸出:把每格切成獨立 PNG,打包成 ZIP(STORE,無壓縮;PNG 本身已壓縮)----
+
+/** 取出單一 frame(裁切後的矩形)成獨立 canvas */
+function frameToCanvas(f){
+  const c = document.createElement("canvas");
+  c.width = f.frame.w; c.height = f.frame.h;
+  c.getContext("2d").drawImage(state.result.canvas,
+    f.frame.x, f.frame.y, f.frame.w, f.frame.h, 0, 0, f.frame.w, f.frame.h);
+  return c;
+}
+function canvasToBytes(cvs){
+  return new Promise(res => cvs.toBlob(async b => res(new Uint8Array(await b.arrayBuffer())), "image/png"));
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n=0;n<256;n++){ let c=n; for (let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); t[n]=c>>>0; }
+  return t;
+})();
+function crc32(bytes){
+  let c = 0xFFFFFFFF;
+  for (let i=0;i<bytes.length;i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c>>>8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+/** 產生 ZIP(STORE)。files: [{name, data:Uint8Array}] → Blob */
+function zipStore(files){
+  const enc = new TextEncoder();
+  const u16 = v => new Uint8Array([v&255,(v>>8)&255]);
+  const u32 = v => new Uint8Array([v&255,(v>>8)&255,(v>>16)&255,(v>>>24)&255]);
+  const chunks = [], central = [];
+  let offset = 0;
+  for (const f of files){
+    const name = enc.encode(f.name), data = f.data, crc = crc32(data);
+    chunks.push(u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(0), u16(0),
+      u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0), name, data);
+    central.push({ name, crc, size:data.length, offset });
+    offset += 30 + name.length + data.length;
+  }
+  const cdStart = offset;
+  for (const c of central){
+    chunks.push(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(0), u16(0),
+      u32(c.crc), u32(c.size), u32(c.size), u16(c.name.length), u16(0), u16(0), u16(0), u16(0),
+      u32(0), u32(c.offset), c.name);
+    offset += 46 + c.name.length;
+  }
+  chunks.push(u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length),
+    u32(offset - cdStart), u32(cdStart), u16(0));
+  return new Blob(chunks, { type:"application/zip" });
+}
+
+async function exportZIP(){
+  if (!state.result) return;
+  const btn = $("exportZip"), old = btn.textContent;
+  btn.disabled = true; btn.textContent = "⏳ 產生中…";
+  try{
+    const base = ($("outName").value || "atlas").replace(/\.[^.]+$/, "");
+    const frames = [...state.result.frames].sort((a,b)=>a.index-b.index);
+    const pad = Math.max(3, String(Math.max(0, frames.length-1)).length);
+    const files = [], metaFrames = [];
+    let seq = 0;
+    for (const f of frames){
+      const bytes = await canvasToBytes(frameToCanvas(f));
+      const fname = `${base}_${String(seq).padStart(pad,"0")}.png`;
+      files.push({ name: fname, data: bytes });
+      metaFrames.push({ filename:fname, index:f.index, size:{ w:f.frame.w, h:f.frame.h },
+        spriteSourceSize:f.spriteSourceSize, sourceSize:f.sourceSize, pivot:f.pivot });
+      seq++;
+    }
+    const metaJson = {
+      meta: { app:"AtlasForge", version:"1.0", type:"frame-sequence", mode:state.packMode,
+              count:frames.length, gap:+$("gap").value, generated:new Date().toISOString() },
+      frames: metaFrames
+    };
+    files.push({ name:"frames.json", data:new TextEncoder().encode(JSON.stringify(metaJson, null, 2)) });
+    download(zipStore(files), base + "_frames.zip");
+  } catch(e){
+    alert("ZIP 產生失敗:" + e);
+  } finally {
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+
 // ============================ 事件綁定 ============================
 
 // 載入
@@ -1136,6 +1220,7 @@ async function handleFiles(files){
     resetRegion();                                     // 切格區域預設為整張圖
     afterLoadGrid();
     $("exportPng").disabled = false;
+    $("exportZip").disabled = false;
     $("exportJson").disabled = false;
     process();
     fitView();                                         // 載入後自動縮放至適合視窗
@@ -1210,7 +1295,7 @@ function updateFramesInfo(){
 bindSeg("inputMode","inputMode", () => {
   updatePanel();
   state.sources = []; state.cells = []; state.result = null;
-  $("thumbs").innerHTML=""; $("exportPng").disabled=true; $("exportJson").disabled=true;
+  $("thumbs").innerHTML=""; $("exportPng").disabled=true; $("exportZip").disabled=true; $("exportJson").disabled=true;
   updateFramesInfo();
   render(); updateStats(); updateAnim();
 });
@@ -1309,6 +1394,7 @@ $("zoomFit").addEventListener("click", fitView);
 window.addEventListener("resize", () => { if (state.sources.length) applyView(); });
 
 $("exportPng").addEventListener("click", exportPNG);
+$("exportZip").addEventListener("click", exportZIP);
 $("exportJson").addEventListener("click", exportJSON);
 
 function syncLabels(){
@@ -1333,6 +1419,7 @@ window.AtlasForge = {
   autoDetectGrid, sliceGrid, framesToCells, contentBBox, resolveBg, updateBg,
   animLoop, drawAnimFrame, playAnim, stopAnim,   // 供測試 / 自動化
   applyView, setZoom, fitView, drawOverlayLayer,
+  exportPNG, exportZIP, exportJSON, zipStore, frameToCanvas, canvasToBytes, crc32,
   async loadFromURLs(urls){
     const src = await Promise.all(urls.map(async u => {
       const blob = await (await fetch(u)).blob();
@@ -1343,7 +1430,7 @@ window.AtlasForge = {
     updateBg();
     resetRegion();
     afterLoadGrid();
-    $("exportPng").disabled = false; $("exportJson").disabled = false;
+    $("exportPng").disabled = false; $("exportZip").disabled = false; $("exportJson").disabled = false;
     updateModeBadge(); process(); fitView();
     return state.result && { w:state.result.w, h:state.result.h, frames:state.result.frames.length };
   }
