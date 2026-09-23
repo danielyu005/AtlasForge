@@ -157,28 +157,45 @@
         <div class="thumbs" id="thumbs"></div>
       </div>
 
-      <!-- 2. 切格(僅大圖模式) -->
+      <!-- 2. 切格 / 設定宮格 -->
       <div class="group" id="sliceGroup">
-        <h2>② 切格</h2>
-        <div class="row">
-          <div class="field"><label>列 Rows</label><input type="number" id="rows" min="1" value="3"></div>
-          <div class="field"><label>行 Cols</label><input type="number" id="cols" min="1" value="6"></div>
+        <h2 id="sliceTitle">② 切格</h2>
+
+        <!-- 大圖模式:切格 -->
+        <div id="sheetControls">
+          <div class="row">
+            <div class="field"><label>列 Rows</label><input type="number" id="rows" min="1" value="3"></div>
+            <div class="field"><label>行 Cols</label><input type="number" id="cols" min="1" value="6"></div>
+          </div>
+          <details id="regionDetails">
+            <summary>切格區域(外邊距 / 非整除微調)</summary>
+            <div class="row">
+              <div class="field"><label>起點 X</label><input type="number" id="gridX" value="0"></div>
+              <div class="field"><label>起點 Y</label><input type="number" id="gridY" value="0"></div>
+            </div>
+            <div class="row">
+              <div class="field"><label>總寬 W</label><input type="number" id="gridW" min="1" value="0"></div>
+              <div class="field"><label>總高 H</label><input type="number" id="gridH" min="1" value="0"></div>
+            </div>
+            <button class="mini" id="regionReset" style="width:100%">↺ 重設為整張圖</button>
+          </details>
+          <div class="row" style="margin-top:10px">
+            <button class="mini" id="autoGrid" style="width:100%">🔍 自動偵測格線</button>
+          </div>
         </div>
-        <details id="regionDetails">
-          <summary>切格區域(外邊距 / 非整除微調)</summary>
-          <div class="row">
-            <div class="field"><label>起點 X</label><input type="number" id="gridX" value="0"></div>
-            <div class="field"><label>起點 Y</label><input type="number" id="gridY" value="0"></div>
+
+        <!-- 單張 frame 模式:設定宮格 -->
+        <div id="framesControls" style="display:none">
+          <div class="hint" id="framesInfo" style="margin-bottom:8px">尚未載入 frame</div>
+          <div class="field" id="framesColsField">
+            <label>每列欄數 Columns</label>
+            <input type="number" id="gridCols" min="1" value="5">
+            <div class="hint" id="framesGridHint">共 0 張 → 排成 0 列 × 0 欄</div>
           </div>
-          <div class="row">
-            <div class="field"><label>總寬 W</label><input type="number" id="gridW" min="1" value="0"></div>
-            <div class="field"><label>總高 H</label><input type="number" id="gridH" min="1" value="0"></div>
-          </div>
-          <button class="mini" id="regionReset" style="width:100%">↺ 重設為整張圖</button>
-        </details>
+        </div>
+
         <div class="row" style="margin-top:10px">
-          <button class="mini" id="autoGrid" style="flex:1">🔍 自動偵測格線</button>
-          <button class="mini" id="skipEmpty" style="flex:1" title="重排時略過全透明的 cell">略過空 cell:開</button>
+          <button class="mini" id="skipEmpty" style="width:100%" title="重排時略過全透明的 cell / frame">略過空 cell:開</button>
         </div>
         <div class="hint" id="gridHint" style="margin-top:6px"></div>
       </div>
@@ -524,6 +541,16 @@ function updateBg(){
   }
 }
 
+/** 載入後決定格線/宮格:大圖 → 自動偵測切格;單張 frame → 依張數預設欄數 */
+function afterLoadGrid(){
+  if (state.inputMode === "sheet"){ applyAutoGrid(); }
+  else {
+    $("gridCols").value = Math.max(1, Math.ceil(Math.sqrt(state.sources.length)));
+    updateFramesInfo();
+    setView("source");   // 顯示宮格排列預覽
+  }
+}
+
 /** 偵測 → 直接套用到 UI 欄位。conf<2.5 視為不確定,提醒使用者核對。 */
 function applyAutoGrid(){
   if (!state.sources.length) return null;
@@ -738,9 +765,11 @@ function rebuildCells(){
 function process(){
   rebuildCells();
   if (!state.cells.length){ state.result = null; render(); updateStats(); updateAnim(); return; }
+  // 連續圖的輸出欄數:大圖模式用 ④ 的 colsOut,單張 frame 模式用 ② 設定宮格的 gridCols
+  const colsOut = state.inputMode === "frames" ? (+$("gridCols").value || 1) : (+$("colsOut").value || 1);
   const opts = {
     gap: +$("gap").value,
-    colsOut: +$("colsOut").value,
+    colsOut,
     maxW: +$("maxW").value,
     pot: $("pot").checked,
     extrude: $("extrude").checked,
@@ -902,11 +931,11 @@ function stopAnim(){
 function toggleAnim(){ state.anim.playing ? stopAnim() : playAnim(); }
 
 function renderFramesSource(canvas){
-  // 把單張 frames 平鋪(只畫影像,不畫邊框;邊框在覆蓋層畫)
-  const per = Math.ceil(Math.sqrt(state.cells.length));
+  // 把單張 frames 依「設定宮格」欄數平鋪(只畫影像,不畫邊框;邊框在覆蓋層畫)
   let cw = 0, ch = 0;
   for (const c of state.cells){ cw = Math.max(cw, c.sw); ch = Math.max(ch, c.sh); }
-  const cols = per, rows = Math.ceil(state.cells.length/per), pad = 4;
+  const cols = Math.max(1, +$("gridCols").value || Math.ceil(Math.sqrt(state.cells.length)));
+  const rows = Math.ceil(state.cells.length/cols), pad = 4;
   canvas.width = cols*(cw+pad); canvas.height = rows*(ch+pad);
   const g = canvas.getContext("2d");
   g.clearRect(0,0,canvas.width,canvas.height);
@@ -1096,7 +1125,7 @@ async function handleFiles(files){
     renderThumbs();
     updateBg();                                        // 判斷透明背景 or 黑底亮度
     resetRegion();                                     // 切格區域預設為整張圖
-    if (state.inputMode === "sheet") applyAutoGrid();  // 載入即自動切格
+    afterLoadGrid();
     $("exportPng").disabled = false;
     $("exportJson").disabled = false;
     process();
@@ -1142,23 +1171,42 @@ function bindSeg(id, key, after){
     b.classList.add("on"); state[key] = b.dataset.v; after && after();
   }));
 }
-bindSeg("inputMode","inputMode", () => {
-  const sheet = state.inputMode==="sheet";
-  $("sliceGroup").style.display = sheet ? "block":"none";
+/** 依 輸入來源 + 重排模式 切換左側面板的區塊、標題與可見欄位 */
+function updatePanel(){
+  const sheet = state.inputMode === "sheet";
+  const uni = state.packMode === "uniform";
+  $("sliceTitle").textContent = sheet ? "② 切格" : "② 設定宮格";
+  $("sheetControls").style.display  = sheet ? "block" : "none";
+  $("framesControls").style.display = sheet ? "none"  : "block";
+  $("framesColsField").style.display = (!sheet && uni) ? "block" : "none"; // 宮格欄數僅連續圖有意義
+  $("colsOutField").style.display    = (sheet && uni)  ? "block" : "none"; // ④ 輸出欄數(大圖連續圖)
+  $("maxWField").style.display       = uni ? "none" : "block";
   $("inputHint").innerHTML = sheet
     ? "一張已排成格狀的圖集,工具會先切格。"
-    : "一次選多張單獨的 frame,工具各自裁切後打包。";
-  state.sources = []; state.cells = []; state.result = null;
-  $("thumbs").innerHTML=""; $("exportPng").disabled=true; $("exportJson").disabled=true;
-  render(); updateStats();
-});
-bindSeg("packMode","packMode", () => {
-  const uni = state.packMode==="uniform";
+    : "一次選多張單獨的 frame,工具排成宮格後打包。";
   $("packHint").innerHTML = uni
     ? "取所有 frame 內容的<b>聯集外框</b>裁切,cell 仍等大但去除共同空白 → 動畫不跳。"
     : "各 sprite 裁到自身最小外框,再用 MaxRects 裝箱,gap 最小、面積最省。";
-  $("colsOutField").style.display = uni ? "block":"none";
-  $("maxWField").style.display = uni ? "none":"block";
+}
+
+/** 更新「設定宮格」的張數與排列提示 */
+function updateFramesInfo(){
+  const n = state.inputMode === "frames" ? state.sources.length : 0;
+  const cols = Math.max(1, +$("gridCols").value || 1);
+  const rows = Math.max(1, Math.ceil(n / cols));
+  $("framesInfo").textContent = n ? `共 ${n} 張 frame` : "尚未載入 frame";
+  $("framesGridHint").textContent = `共 ${n} 張 → 排成 ${rows} 列 × ${cols} 欄`;
+}
+
+bindSeg("inputMode","inputMode", () => {
+  updatePanel();
+  state.sources = []; state.cells = []; state.result = null;
+  $("thumbs").innerHTML=""; $("exportPng").disabled=true; $("exportJson").disabled=true;
+  updateFramesInfo();
+  render(); updateStats(); updateAnim();
+});
+bindSeg("packMode","packMode", () => {
+  updatePanel();
   updateModeBadge();
   process();
 });
@@ -1192,6 +1240,7 @@ $("skipEmpty").addEventListener("click", () => {
 // 參數即時更新
 ["rows","cols","gap","colsOut","maxW","alpha","gridX","gridY","gridW","gridH"].forEach(id =>
   $(id).addEventListener("input", () => { syncLabels(); process(); }));
+$("gridCols").addEventListener("input", () => { updateFramesInfo(); process(); });
 ["pot","extrude"].forEach(id => $(id).addEventListener("change", process));
 ["showGrid","showTrim","showResult"].forEach(id => $(id).addEventListener("change", render));
 $("regionReset").addEventListener("click", () => { resetRegion(); process(); });
@@ -1264,7 +1313,7 @@ function updateModeBadge(){
 }
 
 // 初始
-syncLabels(); updateModeBadge();
+syncLabels(); updateModeBadge(); updatePanel(); updateFramesInfo();
 $("skipEmpty").textContent = "略過空 cell:開";
 state._animBg = "checker";
 updateAnim();   // 設定播放器初始狀態(顯示提示、停用按鈕)
@@ -1284,7 +1333,7 @@ window.AtlasForge = {
     renderThumbs();
     updateBg();
     resetRegion();
-    if (state.inputMode === "sheet") applyAutoGrid();
+    afterLoadGrid();
     $("exportPng").disabled = false; $("exportJson").disabled = false;
     updateModeBadge(); process(); fitView();
     return state.result && { w:state.result.w, h:state.result.h, frames:state.result.frames.length };
