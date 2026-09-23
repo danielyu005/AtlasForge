@@ -994,6 +994,25 @@ function drawOverlayLayer(){
         RED="rgba(240,102,90,.14)",      // 全空 cell 的淡紅底
         TRIM_RED="rgba(232,52,52,.5)";   // 省去空白範圍(50% 半透明)
 
+  // 所有有內容 cell 的「四邊可剃除距離最小公約」(= 連續圖共同裁切量);無內容回傳 null
+  const commonCrop = () => {
+    const wc = state.cells.filter(c=>c.bbox);
+    if (!wc.length) return null;
+    let cl=Infinity,ct=Infinity,cr=Infinity,cb=Infinity;
+    for (const c of wc){ const b=c.bbox;
+      cl=Math.min(cl,b.x); ct=Math.min(ct,b.y);
+      cr=Math.min(cr,c.sw-(b.x+b.w)); cb=Math.min(cb,c.sh-(b.y+b.h)); }
+    return { cl:Math.max(0,cl), ct:Math.max(0,ct), cr:Math.max(0,cr), cb:Math.max(0,cb) };
+  };
+  // 在 (x,y,w,h) 這個 cell/tile 上,把四邊會被共同剃除的空白填紅色
+  const fillRemovable = (x,y,w,h,cp) => {
+    const ih = h - cp.ct - cp.cb;
+    if (cp.ct>0) fill(x, y, w, cp.ct, TRIM_RED);              // 上
+    if (cp.cb>0) fill(x, y+h-cp.cb, w, cp.cb, TRIM_RED);      // 下
+    if (cp.cl>0) fill(x, y+cp.ct, cp.cl, ih, TRIM_RED);      // 左
+    if (cp.cr>0) fill(x+w-cp.cr, y+cp.ct, cp.cr, ih, TRIM_RED); // 右
+  };
+
   // ---- 結果檢視 ----
   if (state.viewMode === "result"){
     if (!state.result) return;
@@ -1011,21 +1030,8 @@ function drawOverlayLayer(){
     if ($("showTrim").checked) for (const c of state.cells) if (c.bbox) box(c.sx+c.bbox.x,c.sy+c.bbox.y,c.bbox.w,c.bbox.h,ORANGE,1);
     // 省去空白範圍:每個 cell 會被共同剃除的四邊空白,以紅色 50% 半透明填色標示
     if (state.packMode === "uniform" && $("showResult").checked){
-      const wc = state.cells.filter(c=>c.bbox);
-      if (wc.length){
-        let cl=Infinity,ct=Infinity,cr=Infinity,cb=Infinity;
-        for (const c of wc){ const b=c.bbox;
-          cl=Math.min(cl,b.x); ct=Math.min(ct,b.y);
-          cr=Math.min(cr,c.sw-(b.x+b.w)); cb=Math.min(cb,c.sh-(b.y+b.h)); }
-        cl=Math.max(0,cl);ct=Math.max(0,ct);cr=Math.max(0,cr);cb=Math.max(0,cb);
-        for (const c of state.cells){
-          const ih = c.sh-ct-cb;
-          if (ct>0) fill(c.sx, c.sy, c.sw, ct, TRIM_RED);               // 上
-          if (cb>0) fill(c.sx, c.sy+c.sh-cb, c.sw, cb, TRIM_RED);       // 下
-          if (cl>0) fill(c.sx, c.sy+ct, cl, ih, TRIM_RED);             // 左
-          if (cr>0) fill(c.sx+c.sw-cr, c.sy+ct, cr, ih, TRIM_RED);     // 右
-        }
-      }
+      const cp = commonCrop();
+      if (cp) for (const c of state.cells) fillRemovable(c.sx, c.sy, c.sw, c.sh, cp);
     }
     if ($("showGrid").checked){
       for (let c=0;c<=cols;c++){ const x=SX(reg.x+reg.w*c/cols); seg(x,SY(reg.y),x,SY(reg.y+reg.h),CYAN,1,HALO); }
@@ -1034,9 +1040,12 @@ function drawOverlayLayer(){
     }
   } else {
     const L = state._framesLayout; if (!L) return;
+    const cp = (state.packMode === "uniform" && $("showResult").checked) ? commonCrop() : null;
     for (const t of L.tiles){ const c=t.cell;
-      if ($("showGrid").checked) box(t.x,t.y,c.sw,c.sh,CYAN,1);
+      if (!c.bbox) fill(t.x,t.y,c.sw,c.sh,RED);
+      if (cp) fillRemovable(t.x, t.y, c.sw, c.sh, cp);
       if ($("showTrim").checked && c.bbox) box(t.x+c.bbox.x,t.y+c.bbox.y,c.bbox.w,c.bbox.h,ORANGE,1);
+      if ($("showGrid").checked) box(t.x,t.y,c.sw,c.sh,CYAN,1);
     }
   }
 }
